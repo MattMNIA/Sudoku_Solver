@@ -11,7 +11,7 @@ def solve(bd):
         return True
     for i in range(1, 10):
         if valid(bd, (row, col), i):
-            bd[row][col] = 1
+            bd[row][col] = i
 
             if (solve(bd)):
                 return True
