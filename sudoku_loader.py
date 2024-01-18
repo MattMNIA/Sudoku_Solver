@@ -2,6 +2,9 @@ import cv2
 import imutils
 from easyocr import Reader
 import numpy as np
+import transform
+from skimage.segmentation import clear_border
+import math
 
 
 reader = Reader(['en'])
@@ -13,10 +16,10 @@ def findPuzzle(img):
     """
 
     contours = []
-    puzzle = "Sudoku_board.png"
+    puzzle = img
     img = cv2.imread(puzzle)
     imgGray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    imgBlur = cv2.GaussianBlur(imgGray, (7,7),3)
+    imgBlur = cv2.GaussianBlur(imgGray, (3, 3),3)
 
 
     #apply threshhold
@@ -31,7 +34,7 @@ def findPuzzle(img):
 
     #initialize puzzle contour
     puzzleCnt = None
-
+    #finds the largest square shaped contour
     for c in cnts:
         perimeter = cv2.arcLength(c, True)
         approx = cv2.approxPolyDP(c, 0.02*perimeter, True)
@@ -40,9 +43,11 @@ def findPuzzle(img):
             puzzleCnt = approx
             break
     x,y,w,h = cv2.boundingRect(puzzleCnt)
-
-    thresh = thresh[x: x + w, y: y + h]
-
+    thresh = transform.fourPointTransform(thresh, puzzleCnt.reshape(4,2))
+    #isolates the puzzle from the rest of the image
+    cv2.imshow('thresh',thresh)
+    if cv2.waitKey(0) & 0xff == ord('q'):
+        cv2.destroyAllWindows()
     return thresh
 
 
@@ -58,33 +63,56 @@ def findCells(thresh):
     #iterate through each cell and fill in array at the same time
     #create is blank function that uses thresh
     thresh_copy = thresh.copy()
-    Xstep = thresh.shape[1] // 9
-    Ystep = thresh.shape[0] // 9
+    Xstep = thresh.shape[0] // 9
+    Ystep = thresh.shape[1] // 9
     for x in range(0,9):
         startX = x * Xstep
-        endX = startX + Xstep
+        endX = (x + 1) * Xstep
         for y in range(0,9):
             startY = y * Ystep
-            endY = startY + Ystep
+            endY = (y + 1) * Ystep
             cell = thresh[startX: endX, startY: endY]
             puzzTable[x, y] = extractNumber(cell)
+            
     return puzzTable
 
 
+def cropCell(cell):
+    """
+    Crops the outer 1/10th of the cell in order to prevent
+    the program from mistaking the borders as part of the number.
+    It crops more off the sides, because numbers tend to be taller than
+    they are wide, and the right and left sides of the box are the most
+    likely to cause problems
+    param cell: binary outline of cell
+    :return: cropped cell
+    """
+    Xsize = cell.shape[0]
+    Ysize = cell.shape[1]
+    Xtrim = Xsize // 10
+    Ytrim = Ysize // 20
+    return cell[Xtrim: Xsize - Xtrim, Ytrim: Ysize - Ytrim]
 
 
-
-if cv2.waitKey(0) & 0xff == ord('q'):
-    cv2.destroyAllWindows()
-
-def extractNumber(cell):
+def extractNumber(thresh):
     """
     param thresh: binary outline of cell
     :return: integer
     """
-    text = reader.readtext(cell, mag_ratio=2.0, allowlist="0123456789")
-
+    thresh = clear_border(thresh)
+    text = reader.readtext(thresh, text_threshold = 0.7, allowlist="123456789")
+    #handling any blank cells
+    
     if len(text) == 0:
         return 0
-    print(text[0][1])
-    return int(text[0][1])
+    if text[0][1] == '':
+        return 0
+    num = int(text[0][1])
+    if num > 9:
+        if(num/10 == 1):
+            return num%10
+        elif(num%10 == 1):
+            return num/10
+        else:
+            return 0
+    return num
